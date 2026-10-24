@@ -1,0 +1,4 @@
+# SAP asset data stays in SharePoint / Google Drive, not in git
+Asset_Master_SAP.xlsx
+SapData.html
+*.xlsx
