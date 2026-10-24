@@ -923,10 +923,44 @@ function shrink(canvas, max, q){
   c.width = Math.round(canvas.width * k); c.height = Math.round(canvas.height * k); c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', q);
 }
-async function readPhoto(file){
-  const c = await fileToCanvas(file, 1400);
+async function readPhoto(file, scanMax){
+  // scanMax: also keep a larger copy for the barcode reader (thin bars disappear at 1400px)
+  const full = await fileToCanvas(file, scanMax || 1400);
+  const c = scanMax ? shrinkCanvas(full, 1400) : full;
   const age = file.lastModified ? Math.max(0, (Date.now() - file.lastModified) / 60000) : 0;   // minutes since the photo was taken
-  return { canvas:c, big:c.toDataURL('image/jpeg', .82), thumb:shrink(c, 180, .6), age, hash:dhash(c) };
+  return { canvas:c, scan:scanMax ? full : null, big:c.toDataURL('image/jpeg', .82), thumb:shrink(c, 180, .6), age, hash:dhash(c) };
+}
+function shrinkCanvas(canvas, max){
+  const k = Math.min(1, max / Math.max(canvas.width, canvas.height)); if (k === 1) return canvas;
+  const c = document.createElement('canvas'); c.width = Math.round(canvas.width * k); c.height = Math.round(canvas.height * k);
+  c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height); return c;
+}
+
+/* ---------- barcode: ZXing (C++ engine, WebAssembly) reads the label on the phone, nothing is uploaded ---------- */
+const ZX_URL = 'https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.5/dist/iife/reader/index.js';
+const ZX_FORMATS = ['Code93', 'Code128', 'Code39', 'DataMatrix', 'QRCode'];   // AEROTHAI labels: Code 93 = Asset13
+let zxP = null;
+function loadZX(){
+  if (zxP) return zxP;
+  zxP = new Promise((res, rej) => {
+    if (window.ZXingWASM) return res(window.ZXingWASM);
+    const s = document.createElement('script'); s.src = ZX_URL; s.async = true; s.crossOrigin = 'anonymous';
+    s.onload = () => window.ZXingWASM ? res(window.ZXingWASM) : rej(new Error('ZXing missing'));
+    s.onerror = () => rej(new Error('ZXing load failed'));
+    document.head.appendChild(s);
+  }).then(z => { try { z.prepareZXingModule({ fireImmediately:true }); } catch (e) {} return z; })
+    .catch(e => { zxP = null; throw e; });
+  return zxP;
+}
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+/** → texts read from barcodes in the photo ([] if none / reader not available) */
+async function readBarcodes(canvas){
+  try {
+    const z = await withTimeout(loadZX(), 10000);
+    const img = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+    const r = await withTimeout(z.readBarcodes(img, { formats:ZX_FORMATS, tryHarder:true, tryRotate:true, tryInvert:false, tryDownscale:true, maxNumberOfSymbols:4 }), 8000);
+    return (r || []).filter(x => x && x.isValid !== false && x.text).map(x => String(x.text).trim()).filter(t => t.length >= 5);
+  } catch (e){ console.warn('barcode', e && e.message || e); return []; }
 }
 /** 256-bit difference hash (hex): near-identical photos give near-identical hashes. */
 function dhash(canvas){
@@ -1197,9 +1231,9 @@ const sheetWrap = (title, body) => '<div class="sheet" role="dialog" aria-modal=
 
 /* ================= SCAN FLOW ================= */
 const STEP_ICONS = ['scan', 'pin', 'camera', 'check'];
-function newDraft(){ return { step:1, busy:false, item:null, reported:null, isNew:false, q:'', results:null, label:null, read:'', snapMsg:'',
+function newDraft(){ return { step:1, busy:false, item:null, reported:null, isNew:false, q:'', results:null, label:null, read:'', snapMsg:'', timing:null, labelFromStep1:false,
   nf:{ number:'', detail:'', note:'' }, tokens:[], location:null, locQ:'', locNew:false, tooBig:null, ph:[null, null, null] }; }
-function openScan(){ D = newDraft(); $('#scan').hidden = false; document.body.style.overflow = 'hidden'; $('#scanClose').innerHTML = ic('x'); renderScan(); }
+function openScan(){ loadZX().catch(() => {}); D = newDraft(); $('#scan').hidden = false; document.body.style.overflow = 'hidden'; $('#scanClose').innerHTML = ic('x'); renderScan(); }
 function closeScan(){ $('#scan').hidden = true; document.body.style.overflow = ''; D = null; }
 const tip = t => '<div class="tip">' + mascot('happy') + '<span>' + t + '</span></div>';
 function canNext(){
@@ -1233,7 +1267,7 @@ async function goStep(d){
     if (r && r.item){ D.isNew = false; D.item = r.item; renderScan(); toast('It is in the list', 'search'); return; }
     if (r && r.reported){ D.isNew = false; D.reported = r.reported; renderScan(); return; }
   }
-  if (d > 0 && D.step === 1 && D.label && !D.ph[0]) D.ph[0] = D.label;   // the label photo is photo 1
+  if (d > 0 && D.step === 1 && D.label && !D.ph[0]){ D.ph[0] = D.label; D.labelFromStep1 = true; }   // the label photo is photo 1 (no second barcode photo)
   D.step += d; renderScan(); $('#scanBody').scrollTop = 0;
 }
 
@@ -1255,19 +1289,41 @@ function step1(){
 }
 function useToken(k){ const t = REG[k]; D.q = t; renderScan(); onQuery(t); }
 async function onSnap(input){
-  const file = input.files && input.files[0]; if (!file) return;
-  const my = D; D.busy = 'Reading the number\u2026'; D.snapMsg = ''; renderScan();
-  let ph; try { ph = await readPhoto(file); } catch (e){ D.busy = false; renderScan(); toast("Can't open photo", 'alert'); return; }
+  const file = input.files && input.files[0]; input.value = ''; if (!file) return;
+  const my = D, t0 = Date.now(); D.busy = 'Reading the barcode\u2026'; D.snapMsg = ''; D.tokens = []; renderScan();
+  let ph; try { ph = await readPhoto(file, 3000); } catch (e){ D.busy = false; renderScan(); toast("Can't open photo", 'alert'); return; }
   if (my !== D) return;
   D.label = { big:ph.big, thumb:ph.thumb, age:ph.age, hash:ph.hash };
-  let r = null;
-  try { r = await call('identify', { image:ph.big }); } catch (e){ if (e.message === 'AUTH') return; }
+  const tm = D.timing = { how:'typed', decode:0, ocr:0, lookup:0, total:0 };
+  // 1) barcode on the phone
+  const td = Date.now(), codes = await readBarcodes(ph.scan); tm.decode = Date.now() - td;
+  ph.scan = null;
   if (my !== D) return;
+  let r = null;
+  if (codes.length){
+    D.busy = 'Looking it up\u2026'; renderScan();
+    try { r = await call('scan', { codes, hash:ph.hash }); } catch (e){ if (e.message === 'AUTH') return; }
+    if (my !== D) return;
+    if (r && r.ms) tm.lookup = r.ms.lookup || 0;
+    if (r && r.item){ tm.how = 'barcode'; tm.total = Date.now() - t0; D.busy = false; D.item = r.item; D.read = r.read || ''; D.pick = 'barcode';
+      if (navigator.vibrate) try { navigator.vibrate(50); } catch (e) {}
+      renderScan(); return; }
+    if (r && r.reported){ D.busy = false; D.reported = r.reported; renderScan(); return; }
+    r = null;   // barcode read but not in the list: OCR would read the same number → go straight to typing
+  } else {
+    // 2) no barcode → OCR on the server as before; never wait forever
+    D.busy = 'Reading the number\u2026'; renderScan();
+    try { r = await withTimeout(call('identify', { image:ph.big, hash:ph.hash }), 30000); } catch (e){ if (e.message === 'AUTH') return; }
+    if (my !== D) return;
+    if (r && r.ms){ tm.ocr = r.ms.ocr || 0; tm.lookup += r.ms.lookup || 0; }
+  }
+  tm.total = Date.now() - t0;
   D.busy = false;
-  if (r && r.item){ D.item = r.item; D.read = r.read || ''; D.pick = 'photo'; }
+  if (codes.length) D.tokens = codes.slice();
+  if (r && r.item){ tm.how = 'photo'; D.item = r.item; D.read = r.read || ''; D.pick = 'photo'; }
   else if (r && r.reported) D.reported = r.reported;
   else {
-    D.tokens = (r && r.tokens) || [];
+    D.tokens = D.tokens.concat((r && r.tokens) || []).filter((t, i, a) => a.indexOf(t) === i);
     D.snapMsg = D.tokens.length ? 'Not found from the photo \u00b7 check the number below' : "Can't read the number \u00b7 type it below";
     D.q = (D.tokens[0] || '').toUpperCase();
   }
@@ -1299,7 +1355,7 @@ function suggHtml(){
   return h || '<p class="small" style="text-align:center">No match</p>';
 }
 async function pickItem(k){
-  const a = REG[k], my = D; D.item = a; D.pick = 'typed'; renderScan();
+  const a = REG[k], my = D; D.item = a; D.pick = 'typed'; if (D.timing) D.timing.how = 'typed'; renderScan();
   try { const r = await call('lookup', { codes:[a.asset] }); if (my === D && r.item){ D.item = r.item; renderScan(); } } catch (e) {}
 }
 function startNew(num){ D.isNew = true; D.nf.number = String(num || '').trim().toUpperCase(); renderScan(); }
@@ -1377,11 +1433,12 @@ function step3(){
     return '<label class="slot ' + (p ? 'done' : next ? 'next' : '') + '"><input type="file" accept="image/*" capture="environment" onchange="onPhoto(this,' + i + ')">' +
       '<span class="num">' + (p ? '\u2713' : i + 1) + '</span>' + (p ? '<img src="' + p.thumb + '" alt="Photo ' + (i + 1) + '"><span class="retake">' + ic('refresh') + '</span>' :
       '<span class="ill">' + (i === 2 ? (big ? EX_BIG : EX_ZONE) : ILL[labels[i][0]]) + '</span><span class="cap">' + labels[i][1] + '<small>' + labels[i][2] + '</small></span>') + '</label>'; };
+  const fromLabel = D.labelFromStep1 && D.ph[0] ? '<div class="vmsg info">' + ic('check') + 'Photo 1 = your label photo from step 1 \u00b7 tap it to retake</div>' : '';
   return '<h2 class="q-title">' + ic('camera') + '3 photos</h2>' +
     '<div class="dz"><div class="row" style="justify-content:space-between"><b class="qb">Too big to move?</b><span class="row"><button class="chip ' + (big === false ? 'on' : '') + '" onclick="setBig(false)">No</button><button class="chip ' + (big === true ? 'on' : '') + '" onclick="setBig(true)">Yes</button></span></div></div>' +
     (big === null ? '<div class="vmsg info">' + ic('help') + 'Answer first, then take the photos</div>' :
       '<div class="stk-tip">' + stickerIc + '<b>Sticker</b> \u2192 ' + ic('camera') + '</div>' +
-      '<div class="slots3">' + [0, 1, 2].map(slot).join('') + '</div>' +
+      '<div class="slots3">' + [0, 1, 2].map(slot).join('') + '</div>' + fromLabel +
       '<div class="hint">' + ic(big ? 'server' : 'pin') + '<span>' + (big ? 'Wide photo where it stands' : 'Move it to the ASSET ZONE') + '</span><span class="bonus">+' + (big ? PTS.big : PTS.move) + (D.isNew ? ' after check' : '') + '</span></div>' +
       lbl('Example \u00b7 wide photo') + '<div class="exbox">' + (big ? EX_BIG : EX_ZONE) + '</div>');
 }
@@ -1389,7 +1446,7 @@ function setBig(v){ D.tooBig = v; renderScan(); }
 async function onPhoto(input, i){
   const file = input.files && input.files[0]; if (!file) return;
   let ph; try { ph = await readPhoto(file); } catch (e){ toast("Can't open photo", 'alert'); return; }
-  D.ph[i] = { big:ph.big, thumb:ph.thumb, age:ph.age, hash:ph.hash }; renderScan();
+  D.ph[i] = { big:ph.big, thumb:ph.thumb, age:ph.age, hash:ph.hash }; if (i === 0) D.labelFromStep1 = false; renderScan();
 }
 /* ---------- step 4: review + submit ---------- */
 function step4(){
@@ -1405,7 +1462,8 @@ function step4(){
 function submit(){
   const btn = $('#subBtn'); if (btn) btn.disabled = true;
   const base = { location:D.location, tooBig:!!D.tooBig, photo1:D.ph[0].big, photo2:D.ph[1].big, photo3:D.ph[2].big, thumb1:D.ph[0].thumb, thumb2:D.ph[1].thumb, thumb3:D.ph[2].thumb, read:D.read || '',
-    pick:D.pick || 'typed', photoAge:Math.round(Math.max.apply(null, D.ph.map(p => p.age || 0))), hashes:D.ph.map(p => p.hash || '') };
+    pick:D.pick || 'typed', photoAge:Math.round(Math.max.apply(null, D.ph.map(p => p.age || 0))), hashes:D.ph.map(p => p.hash || ''),
+    timing:D.timing ? Object.assign({}, D.timing, { how:D.pick || 'typed' }) : null };
   const big = !!D.tooBig, pts = big ? PTS.big : PTS.move, rid = USER.username + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   let o;
   if (D.isNew) o = { rid, kind:'new', label:D.nf.number, pts:0, thumb:D.ph[0].thumb, payload:Object.assign(base, { number:D.nf.number, detail:D.nf.detail, note:D.nf.note }) };
@@ -1583,7 +1641,7 @@ function checkList(){
   return CK.checks.map(f => { const k = keep(f);
     return '<div class="card2 pend"><div class="row"><b class="ttl2">' + esc(f.detail) + '</b><span class="hp" style="margin-left:auto">+' + f.points + '</span></div>' +
       '<div class="small">' + esc(f.id) + ' \u00b7 by <b>' + esc(f.by) + '</b> \u00b7 ' + fmtAt(f.at) + ' \u00b7 ' + ic('pin') + esc(f.location) + '</div>' +
-      '<div class="chips" style="margin:8px 0">' + f.flags.map(x => '<span class="flag red">' + esc(FLAG_TXT(x)) + '</span>').join(' ') + (f.pick === 'typed' ? ' <span class="flag">Typed</span>' : '') + '</div>' +
+      '<div class="chips" style="margin:8px 0">' + f.flags.map(x => '<span class="flag red">' + esc(FLAG_TXT(x)) + '</span>').join(' ') + (f.pick === 'typed' ? ' <span class="flag">Typed</span>' : f.pick === 'barcode' ? ' <span class="flag">Barcode</span>' : '') + '</div>' +
       '<div class="ckgrid"><div class="ckimg" id="ck-' + k + '">' + (f.thumbs[0] ? '<img src="' + esc(f.thumbs[0]) + '" alt="Label photo">' : '') + '</div>' +
       '<div class="small"><div>Item</div><b class="mono">' + esc(f.serial || '\u2014') + '</b><br><span class="mono">' + esc(f.key) + '</span>' + (f.inv ? '<br><span class="mono">' + esc(f.inv) + '</span>' : '') +
       '<div style="margin-top:6px">Read from photo</div><b class="mono">' + esc(f.read || '\u2014') + '</b></div></div>' +

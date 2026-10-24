@@ -26,7 +26,7 @@ const HEADERS = {
   Sessions:  ['Token','Username','Expires'],
   Ref:       ['Asset13','Invent no','Asset Sup','Detail','Serial','Status','Owner','Admin Note','Removed','Added By','Updated By','Updated At'],
   Updates:   ['ID','Timestamp','Username','Asset13','Serial','Invent no','Detail','Location','Too Big','Barcode Check','Barcode Read','Points','State','Photo Barcode','Photo Device','Photo Wide','Thumb1','Thumb2','Thumb3',
-             'Pick','Photo Age','Photo Hash','Flags','Check','Checked By','Checked At'],
+             'Pick','Photo Age','Photo Hash','Flags','Check','Checked By','Checked At','Scan Timing'],
   NewItems:  ['ID','Timestamp','Username','Number','Detail','Note','Location','Too Big','Barcode Read','State','Division','Remark','Status','Owner','Points','Reviewed By','Reviewed At','Photo Barcode','Photo Device','Photo Wide','Thumb1','Thumb2','Thumb3'],
   Locations: ['Location','New','Added By','Added At','Active'],
   Points:    ['Timestamp','Username','Delta','Reason','Ref','By'],
@@ -70,7 +70,8 @@ function api(action, token, payload){
       case 'logout':      return logout_(token);
       case 'search':      return search_(payload);
       case 'lookup':      return lookup_(payload);
-      case 'identify':    return identify_(payload);
+      case 'identify':    return identify_(me, payload);
+      case 'scan':        return scan_(me, payload);
       case 'submitFind':  return once_(payload.rid, () => submitFind_(me, payload));
       case 'submitNew':   return once_(payload.rid, () => submitNew_(me, payload));
       case 'photo':       return photo_(me, payload);
@@ -104,7 +105,7 @@ function api(action, token, payload){
 }
 function withLock_(fn){ const l = LockService.getScriptLock(); l.waitLock(25000); try { return fn(); } finally { l.releaseLock(); } }
 /** Add columns that newer versions need to existing sheets (once). */
-const SCHEMA = '3';
+const SCHEMA = '4';
 function schema_(force){
   const props = PropertiesService.getScriptProperties();
   if (!force && props.getProperty('SCHEMA') === SCHEMA) return;
@@ -142,7 +143,33 @@ function once_(rid, fn){
 function ss_(){
   const id = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
   if (!id) throw new Error('Run setup() first');
-  return SpreadsheetApp.openById(id);
+  const ss = SpreadsheetApp.openById(id);
+  guardTest_(ss);
+  return ss;
+}
+/* ---------- TEST copy safety ----------
+ * A copy of this project whose name contains "TEST" (e.g. "Radar Quest TEST") must use its own Sheet / Drive folder.
+ * If it still points at the live Sheet (copied Script Properties), every call stops with an error. */
+function projectName_(){
+  const c = CacheService.getScriptCache(); let n = c.get('pname');
+  if (n == null){ try { n = DriveApp.getFileById(ScriptApp.getScriptId()).getName(); } catch (e){ n = ''; } c.put('pname', n, 21600); }
+  return n;
+}
+const isTest_ = () => /TEST/i.test(projectName_());
+const dataName_ = base => base + (isTest_() ? ' TEST' : '');
+function guardTest_(ss){
+  if (!isTest_()) return;
+  const c = CacheService.getScriptCache(), key = 'testok:' + ss.getId();
+  if (c.get(key)) return;
+  const fix = '. Delete Script Properties SHEET_ID, PHOTO_FOLDER_ID and EXPORT_FOLDER_ID, then run setup().';
+  if (!/TEST/i.test(ss.getName())) throw new Error('TEST project is linked to the live Sheet "' + ss.getName() + '"' + fix);
+  const props = PropertiesService.getScriptProperties();
+  ['PHOTO_FOLDER_ID', 'EXPORT_FOLDER_ID'].forEach(k => {
+    const fid = props.getProperty(k); if (!fid) return;
+    let name = ''; try { name = DriveApp.getFolderById(fid).getName(); } catch (e){ return; }
+    if (!/TEST/i.test(name)) throw new Error('TEST project is linked to the live Drive folder "' + name + '"' + fix);
+  });
+  c.put(key, '1', 21600);
 }
 const cell_ = v => v instanceof Date ? Utilities.formatDate(v, TZ, TS_FMT) : String(v == null ? '' : v).trim();
 function tbl_(name){
@@ -407,18 +434,51 @@ function tokens_(text){
   const out = raw.slice(); for (let i = 0; i < raw.length - 1; i++) out.push(raw[i] + raw[i + 1]);
   return out.filter(t => nrm_(t).length >= 5 && /\d/.test(t));
 }
-function identify_(p){
-  let text;
-  try { text = ocr_(blob_(p.image, 'label.jpg')); } catch (e){ return { item:null, tokens:[], error:'OCR unavailable' }; }
-  const toks = tokens_(text);
+function identify_(me, p){
+  let text; const t0 = Date.now();
+  try { text = ocr_(blob_(p.image, 'label.jpg')); } catch (e){ return { item:null, tokens:[], ocrError:'OCR unavailable', ms:{ ocr:Date.now() - t0 } }; }
+  const t1 = Date.now(), toks = tokens_(text);
   const idx = refIndex_();
   for (const t of toks){
     const f = fuzz_(t);
     const r = idx.find(x => !x[5] && [x[0], x[1], x[2]].some(c => c && fuzz_(c) === f));
-    if (r) return { item:refOut_(readRef_(r[4]), foundMap_()[r[0]]), read:t, tokens:toks.slice(0, 6) };
+    if (r){
+      rememberPick_(me, p.hash, r[0], 'photo', t);
+      return { item:refOut_(readRef_(r[4]), foundMap_()[r[0]]), read:t, tokens:toks.slice(0, 6), ms:{ ocr:t1 - t0, lookup:Date.now() - t1 } };
+    }
   }
   const look = lookup_({ codes:toks });
-  return { item:null, reported:look.reported || null, tokens:toks.sort((a, b) => b.length - a.length).slice(0, 6) };
+  return { item:null, reported:look.reported || null, tokens:toks.sort((a, b) => b.length - a.length).slice(0, 6), ms:{ ocr:t1 - t0, lookup:Date.now() - t1 } };
+}
+
+/* ---------- barcode (read on the phone with ZXing) ---------- */
+// AEROTHAI asset labels: Code 93 barcode = Asset13, 13 digits (label "1-130-01872-0000" → 1130018720000).
+const ASSET13_RE = /^\d{13}$/;
+/** Codes read from the label barcode → exact match only (no fuzzy matching). Asset13 first. */
+function scan_(me, p){
+  const t0 = Date.now();
+  const raw = (Array.isArray(p.codes) ? p.codes : []).map(c => String(c || '').trim()).filter(Boolean).slice(0, 4);
+  const codes = raw.map(nrm_).filter(c => c.length >= 5 && c.length <= 30);
+  if (!codes.length) return { item:null, ms:{ lookup:0 } };
+  codes.sort((a, b) => (ASSET13_RE.test(b) ? 1 : 0) - (ASSET13_RE.test(a) ? 1 : 0));
+  const look = lookup_({ codes });
+  const ms = { lookup:Date.now() - t0 };
+  if (look.item){
+    rememberPick_(me, p.hash, look.item.asset, 'barcode', look.code);
+    return { item:look.item, read:look.code, ms };
+  }
+  return { item:null, reported:look.reported || null, codes, ms };
+}
+/** The server remembers which item it matched for which label photo (by its fingerprint) for 6 hours.
+ *  At submit the label check is skipped only if photo 1 is that same photo and the item is the same. */
+const pickKey_ = (me, hash) => 'pk:' + me.Username + ':' + String(hash || '').toLowerCase();
+function rememberPick_(me, hash, asset, how, read){
+  if (!/^[0-9a-f]{64}$/i.test(String(hash || ''))) return;
+  try { CacheService.getScriptCache().put(pickKey_(me, hash), JSON.stringify({ asset, how, read:String(read || '').slice(0, 60) }), 21600); } catch (e){}
+}
+function recallPick_(me, hash){
+  if (!/^[0-9a-f]{64}$/i.test(String(hash || ''))) return null;
+  try { const v = CacheService.getScriptCache().get(pickKey_(me, hash)); return v ? JSON.parse(v) : null; } catch (e){ return null; }
 }
 /** Read the label photo and compare with the chosen item (used when the player typed the number). */
 function checkLabel_(dataUrl, it){
@@ -453,7 +513,7 @@ function folder_(key, name){
   if (id){ try { return DriveApp.getFolderById(id); } catch (e){} }
   const f = DriveApp.createFolder(name); props.setProperty(key, f.getId()); return f;
 }
-function savePhoto_(dataUrl, name){ return dataUrl ? folder_('PHOTO_FOLDER_ID', 'Radar Quest Photos').createFile(blob_(dataUrl, name)).getUrl() : ''; }
+function savePhoto_(dataUrl, name){ return dataUrl ? folder_('PHOTO_FOLDER_ID', dataName_('Radar Quest Photos')).createFile(blob_(dataUrl, name)).getUrl() : ''; }
 const thumbOk_ = s => String(s || '').length < 45000 ? (s || '') : '';
 const fileId_ = url => (/\/d\/([\w-]+)/.exec(url || '') || /id=([\w-]+)/.exec(url || '') || [])[1] || '';
 
@@ -491,8 +551,11 @@ function submitFind_(me, d){
   const tag = (it.serial || it.asset).replace(/[^\w.-]+/g, '_') + '_' + Utilities.formatDate(new Date(), TZ, 'yyyyMMdd-HHmmss');
   const urls = [savePhoto_(d.photo1, tag + '_1-barcode.jpg'), savePhoto_(d.photo2, tag + '_2-device.jpg'), savePhoto_(d.photo3, tag + '_3-wide.jpg')];
   // anti-cheat flags for the admin "Needs check" list (points are still given right away)
-  const pick = d.pick === 'photo' ? 'photo' : 'typed';
-  const chk = pick === 'photo' ? { state:'match', read:String(d.read || '') } : checkLabel_(d.photo1, it);
+  // label check: if the server itself matched this exact label photo (barcode or OCR) to this item, no second OCR;
+  // otherwise (typed, retaken photo 1, or anything the server can't confirm) read the label photo again as before
+  const known = recallPick_(me, (d.hashes || [])[0]);
+  const pick = known && known.asset === it.asset ? known.how : 'typed';
+  const chk = pick !== 'typed' ? { state:'match', read:known.read } : checkLabel_(d.photo1, it);
   const age = Math.max(0, Math.round(Number(d.photoAge) || 0));
   const dups = dupPhotos_(d.hashes);
   const flags = [];
@@ -508,7 +571,8 @@ function submitFind_(me, d){
     const row = { ID:id, Timestamp:ts_(), Username:me.Username, Asset13:it.asset, Serial:it.serial, 'Invent no':it.inv, Detail:it.detail, Location:loc,
       'Too Big':big ? 'Y' : '', 'Barcode Check':chk.state, 'Barcode Read':String(chk.read || '').slice(0, 60), Points:pts, State:'Active',
       'Photo Barcode':urls[0], 'Photo Device':urls[1], 'Photo Wide':urls[2], Thumb1:thumbOk_(d.thumb1), Thumb2:thumbOk_(d.thumb2), Thumb3:thumbOk_(d.thumb3),
-      Pick:pick, 'Photo Age':String(age), 'Photo Hash':(d.hashes || []).map(h => /^[0-9a-f]{64}$/i.test(String(h || '')) ? String(h).toLowerCase() : '').join('|'), Flags:flags.join(',') };
+      Pick:pick, 'Photo Age':String(age), 'Photo Hash':(d.hashes || []).map(h => /^[0-9a-f]{64}$/i.test(String(h || '')) ? String(h).toLowerCase() : '').join('|'), Flags:flags.join(','),
+      'Scan Timing':timing_(d.timing) };
     append_(tbl_('Updates'), row);
     clearFoundCache_();
     hist_(me.Username, me.Role, 'Updates', it.asset, 'Found', '', loc, big ? 'too big to move' : 'moved to ASSET ZONE');
@@ -518,6 +582,13 @@ function submitFind_(me, d){
   });
   if (out.error) trashUrls_(urls);
   return out;
+}
+/** "how=barcode decode=180 ocr=0 lookup=640 total=900" (ms) — to compare barcode and OCR speed. */
+function timing_(t){
+  if (!t || typeof t !== 'object') return '';
+  const how = ['barcode', 'photo', 'typed'].includes(t.how) ? t.how : '';
+  const n = k => Math.max(0, Math.min(600000, Math.round(Number(t[k]) || 0)));
+  return (how ? 'how=' + how + ' ' : '') + ['decode', 'ocr', 'lookup', 'total'].map(k => k + '=' + n(k)).join(' ');
 }
 function submitNew_(me, d){
   const number = String(d.number || '').trim().toUpperCase().slice(0, 60);
@@ -567,7 +638,7 @@ function newOut_(r){
 }
 function findOut_(r){
   return { id:r.ID, at:r.Timestamp, by:r.Username, key:r.Asset13, serial:r.Serial, inv:r['Invent no'], detail:r.Detail, location:r.Location, tooBig:yes_(r['Too Big']),
-    check:r['Barcode Check'], read:r['Barcode Read'], pick:r.Pick, age:r['Photo Age'], flags:r.Flags ? String(r.Flags).split(',') : [], verdict:r.Check, checkedBy:r['Checked By'],
+    check:r['Barcode Check'], read:r['Barcode Read'], pick:r.Pick, timing:r['Scan Timing'], age:r['Photo Age'], flags:r.Flags ? String(r.Flags).split(',') : [], verdict:r.Check, checkedBy:r['Checked By'],
     points:Number(r.Points) || 0, state:r.State, thumbs:[r.Thumb1, r.Thumb2, r.Thumb3], photos:[r['Photo Barcode'], r['Photo Device'], r['Photo Wide']] };
 }
 function myFinds_(me){
@@ -763,7 +834,7 @@ function exportZip_(p){
     .getBlob().setName(`radar-quest_${p.from || 'all'}_${p.to || 'all'}.xlsx`);
   DriveApp.getFileById(tmp.getId()).setTrashed(true);
   // pack, max ~40 MB per zip
-  const out = folder_('EXPORT_FOLDER_ID', 'Radar Quest Exports'), parts = [];
+  const out = folder_('EXPORT_FOLDER_ID', dataName_('Radar Quest Exports')), parts = [];
   let cur = [xlsx], size = xlsx.getBytes().length;
   blobs.forEach(([id, name]) => {
     let b; try { b = DriveApp.getFileById(id).getBlob().setName(name); } catch (e){ return; }
@@ -791,7 +862,8 @@ function setup(){
   let ss = null;
   const id = props.getProperty('SHEET_ID');
   if (id){ try { ss = SpreadsheetApp.openById(id); } catch (e){} }
-  if (!ss){ ss = SpreadsheetApp.create('Radar Quest Game Data'); props.setProperty('SHEET_ID', ss.getId()); }
+  if (ss) guardTest_(ss);
+  if (!ss){ ss = SpreadsheetApp.create(dataName_('Radar Quest Game Data')); props.setProperty('SHEET_ID', ss.getId()); }
   Object.keys(HEADERS).forEach(name => {
     let sh = ss.getSheetByName(name);
     if (!sh) sh = ss.insertSheet(name);
@@ -820,7 +892,7 @@ function setup(){
     append_(users, { Username:'admin', Email:email, Avatar:'a3', Role:'admin', Status:'active', Salt:salt, PwHash:hash_(salt, temp), Created:ts_(), Points:0 });
     console.log(`Admin login → email: ${email}  ·  temporary password: ${temp}  (change it in the app: Profile › Change password)`);
   }
-  folder_('PHOTO_FOLDER_ID', 'Radar Quest Photos');
+  folder_('PHOTO_FOLDER_ID', dataName_('Radar Quest Photos'));
   schema_(true);
   console.log('Setup done. Sheet: ' + ss.getUrl());
 }
