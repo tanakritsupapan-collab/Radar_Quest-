@@ -13,7 +13,7 @@ const TS_FMT = 'yyyy-MM-dd HH:mm:ss';
 const DAY = 86400000;
 const SESSION_DAYS = 30;
 const PTS_MOVE = 10;          // moved to the ASSET ZONE
-const PTS_BIG = 5;            // too big to move
+const PTS_BIG = 5;            // not movable (answered "Movable? No")
 const USER_RE = /^[a-z0-9._]{3,20}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const STATUSES = ['Used', 'Spare', 'Dispose'];
@@ -575,8 +575,8 @@ function submitFind_(me, d){
       'Scan Timing':timing_(d.timing) };
     append_(tbl_('Updates'), row);
     clearFoundCache_();
-    hist_(me.Username, me.Role, 'Updates', it.asset, 'Found', '', loc, big ? 'too big to move' : 'moved to ASSET ZONE');
-    addPoints_(me.Username, pts, big ? 'Find (too big to move)' : 'Find', id, 'system');
+    hist_(me.Username, me.Role, 'Updates', it.asset, 'Found', '', loc, big ? 'not movable' : 'moved to ASSET ZONE');
+    addPoints_(me.Username, pts, big ? 'Find (not movable)' : 'Find', id, 'system');
     const u = findUser_(me.Username);
     return { id, pts, points:Number(u.Points) || 0, leaderboard:leaderboard_(tbl_('Users').rows), locations:locations_() };
   });

@@ -26,13 +26,13 @@
 
 ## แท็บใน Google Sheet
 - **Ref** ข้อมูลจาก SAP (Asset13, Invent no, Asset Sup, Detail, Serial) + ช่องที่แอดมินแก้: Status, Owner, Admin Note
-- **Updates** ทุกครั้งที่ผู้เล่นเจอของ (ห้อง, Too big to move, รูป 3 รูป, แต้ม) + ช่องกันโกง: Pick, Photo Age, Photo Hash, Flags, Check, Checked By, Checked At
+- **Updates** ทุกครั้งที่ผู้เล่นเจอของ (ห้อง, Too Big = Y เมื่อตอบ Movable? No, รูป 3 รูป, แต้ม) + ช่องกันโกง: Pick, Photo Age, Photo Hash, Flags, Check, Checked By, Checked At
   (ถ้าเป็น Sheet เก่า ระบบเพิ่มคอลัมน์ที่ขาดให้เองครั้งแรกที่มีคนใช้แอป)
 - **NewItems** ของที่ไม่มีใน SAP (ส้ม = รอตรวจ, เขียว = อนุมัติ, เทา = ปฏิเสธ) + กอง / Remark
 - **Users**, **Locations**, **Points** (ทุกการได้/หักแต้ม), **History** (ใครแก้อะไร เมื่อไร)
 
 ## กติกาแต้ม
-- ย้ายมาที่ ASSET ZONE: **+10** · Too big to move: **+5**
+- คำถาม **Movable?** · **Yes** = ย้ายมาที่ ASSET ZONE: **+10** · **No** = เคลื่อนย้ายไม่ได้ (Not movable): **+5**
 - ของใหม่ที่ไม่มีใน SAP: ได้แต้มเมื่อแอดมิน Approve
 - เครื่องหนึ่งอัปเดตได้ครั้งเดียว · แอดมินสุ่มตรวจและหักแต้มได้ (บันทึกเหตุผล)
 

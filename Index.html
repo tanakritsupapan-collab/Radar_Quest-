@@ -1151,7 +1151,7 @@ function viewHome(){
     (ADM.pendingUsers ? '<button class="adminbar" onclick="ADMT=\'members\';go(\'admin\')">' + ic('userCheck') + '<span><b>' + ADM.pendingUsers + ' user' + (ADM.pendingUsers > 1 ? 's' : '') + ' waiting</b><br><span class="small">Approve new players</span></span>' + ic('next') + '</button>' : '') : '';
   return alerts + outHtml() + '<section class="hero">' + mascot('happy') + '<div class="bubble">Find gear \u00b7 move it to the ASSET ZONE!</div></section>' +
     '<button class="scan-cta" onclick="openScan()"><span class="ic">' + ic('scan') + '</span><span><span class="big">Scan</span><span class="sub">' + ic('camera') + 'snap the label or type the number</span></span></button>' +
-    '<div class="rules2"><div>' + ic('box') + '<b>+' + PTS.move + '</b><span>Moved to<br>ASSET ZONE</span></div><div>' + ic('server') + '<b>+' + PTS.big + '</b><span>Too big<br>to move</span></div><div>' + ic('plus') + '<b>+' + PTS.move + '</b><span>New item<br>after check</span></div></div>' +
+    '<div class="rules2"><div>' + ic('box') + '<b>+' + PTS.move + '</b><span>Moved to<br>ASSET ZONE</span></div><div>' + ic('server') + '<b>+' + PTS.big + '</b><span>Not<br>movable</span></div><div>' + ic('plus') + '<b>+' + PTS.move + '</b><span>New item<br>after check</span></div></div>' +
     '<h2 class="sec">' + ic('trophy') + 'Leaderboard <small>' + (me >= 0 ? 'You are #' + (me + 1) : '') + '</small></h2>' +
     LB.slice(0, 5).map((r, i) => lrow(r, i)).join('') + (LB.length ? '' : '<div class="card small" style="text-align:center">Be the first on the board!</div>') +
     '<button class="demo-note" style="width:100%" onclick="openGuide()">' + ic('play') + 'How to play</button>';
@@ -1179,7 +1179,7 @@ async function loadMine(){
       '<div class="hp ' + (x.points ? '' : 'zero') + '">' + (x.state === 'Pending' ? '\u2026' : '+' + x.points) + '</div></div>').join('') : '') +
     (f.length ? '<h3 class="sub3">Found</h3>' + f.map(x => '<div class="hrow tap" role="button" tabindex="0" onclick="openMine(\'' + keep(x) + '\')">' + (x.thumbs[0] ? '<img class="thumb" src="' + esc(x.thumbs[0]) + '" alt="">' : '<div class="thumb">' + ic(kind(x.detail)[0]) + '</div>') +
       '<div class="hb"><div class="sn">' + esc(x.detail) + '</div><div class="loc"><span class="code">' + esc(x.key) + '</span></div><div class="loc">' + ic('pin') + '<span>' + esc(x.location) + '</span></div>' +
-      '<div class="loc">' + ic('clock') + '<span>' + fmtAt(x.at) + '</span></div>' + (x.tooBig ? '<span class="flag">' + ic('server') + 'Too big to move</span>' : '') + (x.state === 'Reset' ? ' <span class="flag red">Reset by admin</span>' : '') + '</div>' +
+      '<div class="loc">' + ic('clock') + '<span>' + fmtAt(x.at) + '</span></div>' + (x.tooBig ? '<span class="flag">' + ic('server') + 'Not movable</span>' : '') + (x.state === 'Reset' ? ' <span class="flag red">Reset by admin</span>' : '') + '</div>' +
       '<div class="hp">+' + x.points + '</div></div>').join('') : '') +
     (MINE.deductions.length ? '<h3 class="sub3">Points removed by admin</h3>' + MINE.deductions.map(x => '<div class="lrow"><span class="ln">' + esc(x.reason) + '<div class="lt">' + fmtAt(x.at) + '</div></span><span class="lp neg">' + x.delta + '</span></div>').join('') : '') +
     (!f.length && !n.length ? '<div class="empty">' + mascot('sleepy') + '<h2 style="font-size:20px;margin:8px 0 14px">Nothing yet</h2><button class="btn sun" onclick="openScan()">' + ic('scan') + 'Scan</button></div>' : '');
@@ -1189,11 +1189,11 @@ function openMine(k){
   const caps = ['Barcode', 'Device', 'Wide'];
   const rows = isNew
     ? kv('hash', '<b>' + esc(x.number) + '</b>', 'Number') + kv('edit', esc(x.detail), 'Detail') + (x.note ? kv('book', esc(x.note), 'Note') : '') +
-      kv('pin', esc(x.location)) + kv(x.tooBig ? 'server' : 'box', x.tooBig ? 'Too big to move' : 'Moved to ASSET ZONE') + kv('clock', fmtAt(x.at)) +
+      kv('pin', esc(x.location)) + kv(x.tooBig ? 'server' : 'box', x.tooBig ? 'Not movable' : 'Moved to ASSET ZONE') + kv('clock', fmtAt(x.at)) +
       '<div class="kv">' + ic('activity') + '<span><span class="small">State</span> <b>' + esc(x.state) + '</b>' + (x.state === 'Pending' ? ' \u00b7 admin will check' : '') + '</span></div>' +
       (x.points ? kv('star', '+' + x.points, 'Points') : '')
     : kv('tag', esc(x.key), 'Asset') + kv('hash', esc(x.serial), 'S/N') + kv('hash', esc(x.inv), 'Inv') +
-      kv('pin', esc(x.location)) + kv(x.tooBig ? 'server' : 'box', x.tooBig ? 'Too big to move' : 'Moved to ASSET ZONE') + kv('clock', fmtAt(x.at)) +
+      kv('pin', esc(x.location)) + kv(x.tooBig ? 'server' : 'box', x.tooBig ? 'Not movable' : 'Moved to ASSET ZONE') + kv('clock', fmtAt(x.at)) +
       kv('star', '+' + x.points, 'Points') + (x.state === 'Reset' ? '<div class="vmsg bad">' + ic('alert') + 'Reset by admin</div>' : '');
   el.innerHTML = sheetWrap(esc(isNew ? 'New item' : x.detail), (isNew ? '' : '<div class="small" style="margin-bottom:6px">' + esc(x.detail) + '</div>') + '<div class="review">' + rows + '</div>' +
     (isNew && x.state !== 'Rejected' ? '<button class="btn ghost full" style="margin-top:12px" onclick="editMine(\'' + k + '\')">' + ic('edit') + 'Edit</button>' : '') +
@@ -1435,7 +1435,7 @@ function step3(){
       '<span class="ill">' + (i === 2 ? (big ? EX_BIG : EX_ZONE) : ILL[labels[i][0]]) + '</span><span class="cap">' + labels[i][1] + '<small>' + labels[i][2] + '</small></span>') + '</label>'; };
   const fromLabel = D.labelFromStep1 && D.ph[0] ? '<div class="vmsg info">' + ic('check') + 'Photo 1 = your label photo from step 1 \u00b7 tap it to retake</div>' : '';
   return '<h2 class="q-title">' + ic('camera') + '3 photos</h2>' +
-    '<div class="dz"><div class="row" style="justify-content:space-between"><b class="qb">Too big to move?</b><span class="row"><button class="chip ' + (big === false ? 'on' : '') + '" onclick="setBig(false)">No</button><button class="chip ' + (big === true ? 'on' : '') + '" onclick="setBig(true)">Yes</button></span></div></div>' +
+    '<div class="dz"><div class="row" style="justify-content:space-between"><b class="qb">Movable?</b><span class="row"><button class="chip ' + (big === false ? 'on' : '') + '" onclick="setBig(false)">Yes</button><button class="chip ' + (big === true ? 'on' : '') + '" onclick="setBig(true)">No</button></span></div></div>' +
     (big === null ? '<div class="vmsg info">' + ic('help') + 'Answer first, then take the photos</div>' :
       '<div class="stk-tip">' + stickerIc + '<b>Sticker</b> \u2192 ' + ic('camera') + '</div>' +
       '<div class="slots3">' + [0, 1, 2].map(slot).join('') + '</div>' + fromLabel +
@@ -1453,10 +1453,10 @@ function step4(){
   const pts = D.tooBig ? PTS.big : PTS.move, a = D.item;
   return '<h2 class="q-title">' + ic('check') + 'Review</h2><div class="review">' +
     (D.isNew ? kv('plus', '<b>' + esc(D.nf.number) + '</b><br><span class="small">' + esc(D.nf.detail) + (D.nf.note ? ' \u00b7 ' + esc(D.nf.note) : '') + '</span>') : kv(kind(a.detail)[0], '<b>' + esc(a.detail) + '</b><br><span class="small">' + esc(a.asset) + '</span>')) +
-    kv('pin', esc(D.location) + (D.locNew ? ' <span class="newpill">NEW</span>' : '')) + kv(D.tooBig ? 'server' : 'box', D.tooBig ? 'Too big to move' : 'Moved to ASSET ZONE') +
+    kv('pin', esc(D.location) + (D.locNew ? ' <span class="newpill">NEW</span>' : '')) + kv(D.tooBig ? 'server' : 'box', D.tooBig ? 'Not movable' : 'Moved to ASSET ZONE') +
     '<div class="kv">' + ic('camera') + '<span class="rvph">' + D.ph.map(p => '<img src="' + p.thumb + '" alt="">').join('') + '</span></div>' +
     kv('user', esc(USER.username)) + '</div>' +
-    '<div class="preview"><div class="pl">' + ic(D.tooBig ? 'server' : 'box') + '<span>' + (D.isNew ? 'New item \u00b7 after admin check' : D.tooBig ? 'Too big to move' : 'Moved to ASSET ZONE') + '</span><b>+' + pts + '</b></div><div class="pt"><span>' + (D.isNew ? 'Pending' : 'Total') + '</span><span>+' + pts + '</span></div></div>';
+    '<div class="preview"><div class="pl">' + ic(D.tooBig ? 'server' : 'box') + '<span>' + (D.isNew ? 'New item \u00b7 after admin check' : D.tooBig ? 'Not movable' : 'Moved to ASSET ZONE') + '</span><b>+' + pts + '</b></div><div class="pt"><span>' + (D.isNew ? 'Pending' : 'Total') + '</span><span>+' + pts + '</span></div></div>';
 }
 /* Submit: show the celebration right away, send in the background (with retry). */
 function submit(){
@@ -1532,7 +1532,7 @@ function celebrate(pts, pending, big){
   const conf = '<div class="confetti">' + Array.from({ length:40 }, () => '<i style="left:' + Math.random() * 100 + '%;background:' + ['#FFC23D', '#2FC9A6', '#FF8FA8', '#5D6BC4'][Math.floor(Math.random() * 4)] + ';animation-duration:' + (1.6 + Math.random() * 1.6) + 's;animation-delay:' + Math.random() * .5 + 's"></i>').join('') + '</div>';
   el.innerHTML = (pending ? '' : conf) + '<div class="cel" role="dialog" aria-modal="true">' + mascot(pending ? 'happy' : 'wow', 'bounce') +
     (pending ? '<div class="gain zero">Thanks!</div><div class="cool" style="margin:0 0 14px">' + ic('clock') + '<span>+' + (big ? PTS.big : PTS.move) + ' after admin checks</span></div>'
-      : '<div class="gain">+' + pts + '</div><div class="lines"><div>' + ic(big ? 'server' : 'box') + (big ? 'Too big to move' : 'Moved to ASSET ZONE') + '</div></div>') +
+      : '<div class="gain">+' + pts + '</div><div class="lines"><div>' + ic(big ? 'server' : 'box') + (big ? 'Not movable' : 'Moved to ASSET ZONE') + '</div></div>') +
     '<div class="acts"><button class="btn ghost" onclick="$(\'#cel\').hidden=true" aria-label="Home">' + ic('home') + '</button><button class="btn sun" onclick="$(\'#cel\').hidden=true;openScan()">' + ic('scan') + 'Next</button></div></div>';
   el.hidden = false;
 }
@@ -1542,7 +1542,7 @@ let GIF = null;
 async function openGuide(){
   const el = $('#guide');
   el.innerHTML = '<div class="gcard" role="dialog" aria-modal="true"><h2>\u0e27\u0e34\u0e18\u0e35\u0e40\u0e25\u0e48\u0e19</h2><div class="gifbox">' + (GIF ? '<img src="' + GIF + '" alt="\u0e27\u0e34\u0e18\u0e35\u0e40\u0e01\u0e47\u0e1a\u0e41\u0e15\u0e49\u0e21">' : ic('loader', 'spin')) + '</div>' +
-    '<p>\u0e2b\u0e32\u0e02\u0e2d\u0e07 \u203a \u0e40\u0e25\u0e37\u0e2d\u0e01\u0e2b\u0e49\u0e2d\u0e07 \u203a \u0e16\u0e48\u0e32\u0e22 3 \u0e23\u0e39\u0e1b \u203a +' + PTS.move + '<br>\u0e22\u0e01\u0e44\u0e21\u0e48\u0e44\u0e2b\u0e27: +' + PTS.big + '</p>' +
+    '<p>\u0e2b\u0e32\u0e02\u0e2d\u0e07 \u203a \u0e40\u0e25\u0e37\u0e2d\u0e01\u0e2b\u0e49\u0e2d\u0e07 \u203a \u0e16\u0e48\u0e32\u0e22 3 \u0e23\u0e39\u0e1b \u203a +' + PTS.move + '<br>\u0e22\u0e49\u0e32\u0e22\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49: +' + PTS.big + '</p>' +
     '<div class="rules3"><div><span class="ri">' + ic('camera') + '</span>\u0e16\u0e48\u0e32\u0e22\u0e1b\u0e49\u0e32\u0e22\u0e08\u0e23\u0e34\u0e07<br>\u0e23\u0e39\u0e1b\u0e43\u0e2b\u0e21\u0e48</div><div><span class="ri">' + ic('eye') + '</span>\u0e41\u0e2d\u0e14\u0e21\u0e34\u0e19<br>\u0e15\u0e23\u0e27\u0e08\u0e17\u0e38\u0e01\u0e23\u0e39\u0e1b</div><div class="bad"><span class="ri">' + ic('x') + '</span>\u0e02\u0e2d\u0e07\u0e1c\u0e34\u0e14<br>\u0e42\u0e14\u0e19\u0e2b\u0e31\u0e01\u0e41\u0e15\u0e49\u0e21</div></div>' +
     '<button class="btn sun full" onclick="closeGuide()">' + ic('play') + '\u0e40\u0e23\u0e34\u0e48\u0e21\u0e40\u0e25\u0e22</button></div>';
   el.hidden = false;
@@ -1605,7 +1605,7 @@ const photoLinks = (ph, th) => '<div class="thumbs">' + [0, 1, 2].map(i => '<a '
 function newCard(x){
   const k = keep(x), pend = x.state === 'Pending';
   return '<div class="card2 ' + (pend ? 'pend' : x.state === 'Approved' ? 'appr' : 'rej') + '"><div class="row"><b class="ttl2">' + esc(x.detail) + '</b><span class="newpill st ' + x.state + '">' + x.state.toUpperCase() + '</span></div>' +
-    '<div class="small">' + esc(x.id) + ' \u00b7 <b class="mono">' + esc(x.number) + '</b> \u00b7 by ' + esc(x.by) + ' \u00b7 ' + fmtAt(x.at) + '</div><div class="small">' + ic('pin') + esc(x.location) + (x.tooBig ? ' \u00b7 too big to move' : '') + (x.note ? ' \u00b7 ' + esc(x.note) : '') + '</div>' +
+    '<div class="small">' + esc(x.id) + ' \u00b7 <b class="mono">' + esc(x.number) + '</b> \u00b7 by ' + esc(x.by) + ' \u00b7 ' + fmtAt(x.at) + '</div><div class="small">' + ic('pin') + esc(x.location) + (x.tooBig ? ' \u00b7 not movable' : '') + (x.note ? ' \u00b7 ' + esc(x.note) : '') + '</div>' +
     photoLinks(x.photos, x.thumbs) +
     lbl('\u0e01\u0e2d\u0e07 (Division)') + '<input class="input np" id="dv-' + k + '" value="' + esc(x.division) + '" placeholder="After checking with \u0e01\u0e1e.">' +
     lbl('Remark') + '<input class="input np" id="rm-' + k + '" value="' + esc(x.remark) + '">' +
@@ -1626,7 +1626,7 @@ function adminFinds(){
   return sw + '<div class="inwrap" style="margin-bottom:12px">' + ic('search') + '<input class="input" id="fq" placeholder="Asset, serial, user, room\u2026" value="' + esc(FQ) + '" onkeydown="if(event.key===\'Enter\'){FQ=this.value;FL=null;renderAdmin()}"></div>' +
     (FL ? (FL.finds.length ? FL.finds.map(f => '<button class="hrow gear" onclick="openAsset(\'' + esc(f.key) + '\')">' + (f.thumbs[0] ? '<img class="thumb" src="' + esc(f.thumbs[0]) + '" alt="">' : '<div class="thumb">' + ic(kind(f.detail)[0]) + '</div>') +
       '<div class="hb"><div class="sn">' + esc(f.detail) + '</div><div class="loc"><span class="code">' + esc(f.key) + '</span></div><div class="loc">' + ic('pin') + '<span>' + esc(f.location) + '</span></div><div class="loc">' + ic('user') + '<span>' + esc(f.by) + ' \u00b7 ' + fmtAt(f.at) + '</span></div>' +
-      (f.tooBig ? '<span class="flag">Too big</span> ' : '') + ((f.flags || []).length ? '<span class="flag ' + (f.verdict === 'OK' ? '' : 'red') + '">' + (f.verdict ? 'Checked ' + f.verdict : 'Needs check') + '</span> ' : '') + (f.state === 'Reset' ? '<span class="flag red">Reset</span>' : '') + '</div><div class="hp">+' + f.points + '</div></button>').join('') + (FL.total > FL.finds.length ? '<p class="small" style="text-align:center">Showing ' + FL.finds.length + ' of ' + FL.total + '</p>' : '')
+      (f.tooBig ? '<span class="flag">Not movable</span> ' : '') + ((f.flags || []).length ? '<span class="flag ' + (f.verdict === 'OK' ? '' : 'red') + '">' + (f.verdict ? 'Checked ' + f.verdict : 'Needs check') + '</span> ' : '') + (f.state === 'Reset' ? '<span class="flag red">Reset</span>' : '') + '</div><div class="hp">+' + f.points + '</div></button>').join('') + (FL.total > FL.finds.length ? '<p class="small" style="text-align:center">Showing ' + FL.finds.length + ' of ' + FL.total + '</p>' : '')
       : '<div class="empty"><p class="small">No finds</p></div>') : '<div class="count">' + ic('loader', 'spin') + '</div>') +
     '<button class="btn ghost full" style="margin-top:8px" onclick="openAddAsset()">' + ic('plus') + 'Add asset to list</button>';
 }
@@ -1682,7 +1682,7 @@ function renderAsset(){
   const a = AS.item;
   const findsHtml = AS.finds.map(f => { const k = keep(f);
     return '<div class="dz"><div class="row"><b>' + esc(f.by) + '</b><span class="small">' + fmtAt(f.at) + '</span><span class="bonus" style="margin-left:auto">+' + f.points + '</span></div>' +
-      '<div class="small">' + (f.tooBig ? 'Too big to move' : 'Moved to ASSET ZONE') + ' \u00b7 barcode ' + esc(f.check || '-') + (f.state === 'Reset' ? ' \u00b7 <b>RESET</b>' : '') + '</div>' + photoLinks(f.photos, f.thumbs) +
+      '<div class="small">' + (f.tooBig ? 'Not movable' : 'Moved to ASSET ZONE') + ' \u00b7 barcode ' + esc(f.check || '-') + (f.state === 'Reset' ? ' \u00b7 <b>RESET</b>' : '') + '</div>' + photoLinks(f.photos, f.thumbs) +
       lbl('Location') + locSelect('fl-' + k, f.location) +
       '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="chip" onclick="saveFindLoc(\'' + k + '\')">' + ic('pin') + 'Save location</button>' +
       '<button class="chip danger" onclick="deduct(\'' + k + '\')">' + ic('minus') + 'Deduct points</button>' + (f.state !== 'Reset' ? '<button class="chip" onclick="resetFind(\'' + k + '\')">' + ic('refresh') + 'Reset find</button>' : '') + '</div></div>'; }).join('');
