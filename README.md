@@ -90,5 +90,6 @@
 ## อัปเดตโค้ดครั้งต่อไป
 วางโค้ดใหม่ → Ctrl+S → Deploy › Manage deployments › ✏️ › Version: New version › Deploy (ลิงก์เดิม)
 
-เวอร์ชันที่ deploy ล่าสุด: **Version 6** (24 ต.ค. 2026 12:18) — บาร์โค้ด ZXing + OCR สำรอง (schema 4)
-ย้อนกลับ: Deploy › Manage deployments › ✏️ › Version: **Version 5** (18 ต.ค. 21:58) › Deploy (ลิงก์เดิม)
+เวอร์ชันที่ deploy ล่าสุด: **Version 7** (3 พ.ย. 2026 11:40) — คำถาม "Movable? Yes/No" แทน "Too big to move?"
+- Version 6 (24 ต.ค. 2026 12:18) — บาร์โค้ด ZXing + OCR สำรอง (schema 4)
+ย้อนกลับ: Deploy › Manage deployments › ✏️ › Version: **Version 6** › Deploy (ลิงก์เดิม)
